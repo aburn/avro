@@ -296,7 +296,6 @@ string CodeGen::generateRecordType(const NodePtr& n)
 
       if (isAvroPrimitive(n->leafAt(i))) {
         const avro::GenericDatum &gd = n->defaultValueAt(i);
-        std::cout << "Default value type:  " << gd.type() << '\n';
 
         switch (gd.type()) {
           case avro::AVRO_INT:
