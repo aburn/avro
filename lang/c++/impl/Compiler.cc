@@ -25,6 +25,8 @@
 
 #include "json/JsonDom.hh"
 
+#include <iostream>
+
 using std::string;
 using std::map;
 using std::vector;

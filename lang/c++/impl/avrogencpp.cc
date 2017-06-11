@@ -214,6 +214,40 @@ static string cppNameOf(const NodePtr& n)
     }
 }
 
+static bool isAvroPrimitive (const NodePtr& n)
+{
+    switch (n->type()) {
+    case avro::AVRO_NULL:
+        return false;
+    case avro::AVRO_STRING:
+        return true;
+    case avro::AVRO_BYTES:
+        return false;
+    case avro::AVRO_INT:
+        return true;
+    case avro::AVRO_LONG:
+        return true;
+    case avro::AVRO_FLOAT:
+        return true;
+    case avro::AVRO_DOUBLE:
+        return true;
+    case avro::AVRO_BOOL:
+        return true;
+    case avro::AVRO_RECORD:
+    case avro::AVRO_ENUM:
+    case avro::AVRO_FIXED:
+        return false;
+    case avro::AVRO_ARRAY:
+        return false;
+    case avro::AVRO_MAP:
+        return false;
+    case avro::AVRO_SYMBOLIC:
+        return false;
+    default:
+        return false;
+    }
+}
+
 string CodeGen::generateRecordType(const NodePtr& n)
 {
     size_t c = n->leaves();
@@ -251,19 +285,53 @@ string CodeGen::generateRecordType(const NodePtr& n)
         os_ << " :";
     }
     os_ << "\n";
+
     for (size_t i = 0; i < c; ++i) {
-        os_ << "        " << n->nameAt(i) << "(";
-        if (! noUnion_ && n->leafAt(i)->type() == avro::AVRO_UNION) {
-            os_ << n->nameAt(i) << "_t";
-        } else {
-            os_ << types[i];
+      os_ << "        " << n->nameAt(i) << "(";
+      if (! noUnion_ && n->leafAt(i)->type() == avro::AVRO_UNION) {
+        os_ << n->nameAt(i) << "_t";
+      } else {
+        os_ << types[i];
+      }
+
+      if (isAvroPrimitive(n->leafAt(i))) {
+        const avro::GenericDatum &gd = n->defaultValueAt(i);
+        std::cout << "Default value type:  " << gd.type() << '\n';
+
+        switch (gd.type()) {
+          case avro::AVRO_INT:
+            os_ << "(" << gd.value<int32_t>() << "))";
+            break;
+          case avro::AVRO_DOUBLE:
+            os_ << "(" << gd.value<double>() << "))";
+            break;
+          case avro::AVRO_LONG:
+            os_ << "(" << gd.value<int64_t>() << "))";
+            break;
+          case avro::AVRO_FLOAT:
+            os_ << "(" << gd.value<float>() << "))";
+            break;
+          case avro::AVRO_BOOL:
+            os_ << "(" << gd.value<bool>() << "))";
+            break;
+          case avro::AVRO_STRING:
+            os_ << "(\"" << gd.value<std::string>() << "\"))";
+            break;
+          default:
+            os_ << "())";
+            break;
         }
+      } else {
         os_ << "())";
-        if (i != (c - 1)) {
-            os_ << ',';
-        }
-        os_ << "\n";
+      }
+
+      if (i != (c - 1)) {
+        os_ << ',';
+      }
+
+      os_ << "\n";
     }
+
     os_ << "        { }\n";
     os_ << "};\n\n";
     return decoratedName;
