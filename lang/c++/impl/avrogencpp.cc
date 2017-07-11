@@ -24,6 +24,7 @@
 #include <fstream>
 #include <map>
 #include <set>
+#include <algorithm>
 
 #include <boost/algorithm/string.hpp>
 #include <boost/lexical_cast.hpp>
@@ -82,6 +83,7 @@ class CodeGen {
     const bool noUnion_;
     const std::string guardString_;
     boost::mt19937 random_;
+    std::ostream& jsonUtil_;
 
     vector<PendingSetterGetter> pendingGettersAndSetters;
     vector<PendingConstructor> pendingConstructors;
@@ -89,7 +91,7 @@ class CodeGen {
     map<NodePtr, string> done;
     set<NodePtr> doing;
 
-    std::string guard();
+    std::string guard(std::string);
     std::string fullname(const string& name) const;
     std::string generateEnumType(const NodePtr& n);
     std::string cppTypeOf(const NodePtr& n);
@@ -105,7 +107,7 @@ class CodeGen {
     void generateUnionTraits(const NodePtr& n);
     void emitCopyright();
 public:
-    CodeGen(std::ostream& os, const std::string& ns,
+    CodeGen(std::ostream& os, std::ostream& jsonUtil, const std::string& ns,
         const std::string& schemaFile, const std::string& headerFile,
         const std::string& guardString,
         const std::string& includePrefix, bool noUnion) :
@@ -113,7 +115,10 @@ public:
         schemaFile_(schemaFile), headerFile_(headerFile),
         includePrefix_(includePrefix), noUnion_(noUnion),
         guardString_(guardString),
-        random_(static_cast<uint32_t>(::time(0))) { }
+        random_(static_cast<uint32_t>(::time(0))), jsonUtil_(jsonUtil)
+        { 
+            
+        }
     void generate(const ValidSchema& schema);
 };
 
@@ -263,6 +268,9 @@ string CodeGen::generateRecordType(const NodePtr& n)
     }
 
     os_ << "struct " << decoratedName << " {\n";
+
+    jsonUtil_ << "void from_json\(const nlohmann::json& j, " << decoratedName << "& obj) {\n";
+
     if (! noUnion_) {
         for (size_t i = 0; i < c; ++i) {
             if (n->leafAt(i)->type() == avro::AVRO_UNION) {
@@ -276,6 +284,7 @@ string CodeGen::generateRecordType(const NodePtr& n)
             os_ << "    " << n->nameAt(i) << "_t";
         } else {
             os_ << "    " << types[i];
+            jsonUtil_ << "    " << "obj." << n->nameAt(i) << " = j.at(\"" << n->nameAt(i) << "\").get<" << types[i] << ">();\n";        
         }
         os_ << ' ' << n->nameAt(i) << ";\n";
     }
@@ -333,6 +342,7 @@ string CodeGen::generateRecordType(const NodePtr& n)
 
     os_ << "        { }\n";
     os_ << "};\n\n";
+    jsonUtil_ << "};\n\n";
     return decoratedName;
 }
 
@@ -765,18 +775,19 @@ void CodeGen::emitCopyright()
         " */\n\n\n";
 }
 
-string CodeGen::guard()
+string CodeGen::guard(string g)
 {
-    string h = headerFile_;
+    string h = g;
     makeCanonical(h, true);
     return h + "_" + lexical_cast<string>(random_()) + "__H_";
 }
 
 void CodeGen::generate(const ValidSchema& schema)
 {
-    emitCopyright();
+    // emitCopyright();
 
-    string h = guardString_.empty() ? guard() : guardString_;
+    string h = guardString_.empty() ? guard(headerFile_) : guardString_;
+    string json_header_guard = guard(headerFile_ + "_json_util");
 
     os_ << "#ifndef " << h << "\n";
     os_ << "#define " << h << "\n\n\n";
@@ -787,6 +798,12 @@ void CodeGen::generate(const ValidSchema& schema)
         << "#include \"" << includePrefix_ << "Encoder.hh\"\n"
         << "#include \"" << includePrefix_ << "Decoder.hh\"\n"
         << "\n";
+
+    jsonUtil_ << "#ifndef " << json_header_guard << "\n";
+    jsonUtil_ << "#define " << json_header_guard << "\n\n\n";
+
+    jsonUtil_ << "#include <json/json.hpp>\n\n";
+
 
     if (! ns_.empty()) {
         os_ << "namespace " << ns_ << " {\n";
@@ -824,8 +841,9 @@ void CodeGen::generate(const ValidSchema& schema)
     os_ << "}\n";
 
     os_ << "#endif\n";
+    jsonUtil_ << "#endif // end " << json_header_guard << '\n';
     os_.flush();
-
+    jsonUtil_.flush();
 }
 
 namespace po = boost::program_options;
@@ -904,9 +922,13 @@ int main(int argc, char** argv)
         if (! outf.empty()) {
             string g = readGuard(outf);
             ofstream out(outf.c_str());
-            CodeGen(out, ns, inf, outf, g, incPrefix, noUnion).generate(schema);
+            string jsonUtilFile = (outf  + "_json_util");
+            std::transform(jsonUtilFile.begin(), jsonUtilFile.end(), jsonUtilFile.begin(), ::tolower);
+            ofstream jsonUtil(jsonUtilFile.c_str());
+            CodeGen(out, jsonUtil, ns, inf, outf, g, incPrefix, noUnion).generate(schema);
         } else {
-            CodeGen(std::cout, ns, inf, outf, "", incPrefix, noUnion).
+            ofstream jsonUtil("temp");
+            CodeGen(std::cout, jsonUtil, ns, inf, outf, "", incPrefix, noUnion).
                 generate(schema);
         }
         return 0;
